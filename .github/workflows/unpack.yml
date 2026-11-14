@@ -1,0 +1,43 @@
+name: unpack
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: write
+  pages: write
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unpack archives
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full
+          for round in 1 2 3 4; do
+            find . -type f -not -path './.git/*' -not -path './.github/*' | while read -r f; do
+              case "$(file -b --mime-type "$f")" in
+                application/zip|application/x-7z-compressed)
+                  t=$(mktemp -d)
+                  if 7z x -y -o"$t" "$f" >/dev/null; then
+                    rm -f "$f"
+                    cp -rf "$t"/. "$(dirname "$f")"/
+                  fi
+                  rm -rf "$t"
+                  ;;
+              esac
+            done
+          done
+          if [ ! -f index.html ]; then
+            i=$(find . -name index.html -not -path './.git/*' | head -n1)
+            if [ -n "$i" ]; then cp -rf "$(dirname "$i")"/. .; fi
+          fi
+          git config user.name "unpack-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "unpack archives"
+          git push || true
+      - name: Rebuild Pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
